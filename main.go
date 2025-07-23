@@ -32,10 +32,12 @@ func main() {
 	p, err := c.CoreV1().Pods("default").Create(ctx, &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{GenerateName: "test-"},
 		Spec: corev1.PodSpec{
+			HostNetwork:   true, // TODO: have client fail when this is set to false; set to true by default.
+			RestartPolicy: corev1.RestartPolicyNever,
 			Containers: []corev1.Container{{
 				Name:  "test",
 				Image: "cgr.dev/chainguard/wolfi-base",
-				Args:  []string{"echo", "hello world"},
+				Args:  []string{"sh", "-c", "echo 'Starting...' && sleep 10 && echo 'Working...' && sleep 10 && echo 'Done!' && exit 0"},
 			}},
 		},
 	}, metav1.CreateOptions{})
@@ -78,14 +80,21 @@ func main() {
 			log.With("pod", pod.Name).Debugf("pod added: %s %s", pod.Name, pod.Status.Phase)
 		case watch.Modified:
 			log.With("pod", pod.Name).Infof("pod modified: %s %s", pod.Name, pod.Status.Phase)
+			if pod.Status.Phase == corev1.PodRunning {
+				log.Infof("Pod is running!")
+			}
+			if pod.Status.Phase == corev1.PodSucceeded {
+				log.Infof("Pod completed successfully!")
+				log.Infof("To delete VM: gcloud compute instances delete %s --project=%s --zone=%s", pod.Name, *project, *zone)
+				return
+			}
+			if pod.Status.Phase == corev1.PodFailed {
+				log.Infof("Pod failed!")
+				log.Infof("To delete VM: gcloud compute instances delete %s --project=%s --zone=%s", pod.Name, *project, *zone)
+				return
+			}
 		case watch.Deleted:
 			log.With("pod", pod.Name).Infof("pod deleted: %s %s", pod.Name, pod.Status.Phase)
 		}
 	}
-
-	// Delete the pod
-	if err := c.CoreV1().Pods("default").Delete(ctx, p.Name, metav1.DeleteOptions{}); err != nil {
-		log.Fatalf("error deleting pod: %v", err)
-	}
-	log.Infof("deleted pod: %s", p.Name)
 }

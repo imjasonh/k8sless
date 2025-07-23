@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/chainguard-dev/clog"
 	"github.com/google/uuid"
 	"google.golang.org/api/compute/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -51,7 +52,7 @@ func (p *pods) Create(ctx context.Context, pod *corev1.Pod, opts metav1.CreateOp
 	if pod.ObjectMeta.GenerateName != "" {
 		pod.ObjectMeta.Name = pod.ObjectMeta.GenerateName + p.suffix
 	}
-	instance := ToInstance(pod)
+	instance := ToInstance(pod, p.project, p.zone)
 	op, err := p.svc.Instances.Insert(p.project, p.zone, &instance).Do()
 	if err != nil {
 		return nil, fmt.Errorf("error creating instance: %v", err)
@@ -83,20 +84,58 @@ func (p *pods) Delete(ctx context.Context, name string, opts metav1.DeleteOption
 }
 
 func (p *pods) Get(ctx context.Context, name string, opts metav1.GetOptions) (*corev1.Pod, error) {
+	log := clog.FromContext(ctx)
 	instance, err := p.svc.Instances.Get(p.project, p.zone, name).Do()
 	if err != nil {
 		return nil, fmt.Errorf("error getting instance: %v", err)
 	}
+
+	// Try to get pod status from kubelet
+	var externalIP string
+	if len(instance.NetworkInterfaces) > 0 && len(instance.NetworkInterfaces[0].AccessConfigs) > 0 {
+		externalIP = instance.NetworkInterfaces[0].AccessConfigs[0].NatIP
+	}
+
+	if externalIP != "" {
+		kubelet := newKubeletClient(externalIP)
+		if pod, err := kubelet.GetPod(name); err == nil {
+			log.Debugf("got pod from kubelet for %s", name)
+			return pod, nil
+		} else {
+			log.Debugf("kubelet not ready for %s, using instance status: %v", name, err)
+		}
+	}
+
 	return ToPod(instance), nil
 }
 
 func (p *pods) List(ctx context.Context, opts metav1.ListOptions) (*corev1.PodList, error) {
+	log := clog.FromContext(ctx)
 	instances, err := p.svc.Instances.List(p.project, p.zone).Do()
 	if err != nil {
 		return nil, fmt.Errorf("error listing instances: %v", err)
 	}
+
 	pods := &corev1.PodList{}
 	for _, instance := range instances.Items {
+		// Try to get pod status from kubelet
+		var externalIP string
+		if len(instance.NetworkInterfaces) > 0 && len(instance.NetworkInterfaces[0].AccessConfigs) > 0 {
+			externalIP = instance.NetworkInterfaces[0].AccessConfigs[0].NatIP
+		}
+
+		if externalIP != "" {
+			kubelet := newKubeletClient(externalIP)
+			if pod, err := kubelet.GetPod(instance.Name); err == nil {
+				log.Debugf("got pod from kubelet for %s", instance.Name)
+				pods.Items = append(pods.Items, *pod)
+				continue
+			} else {
+				log.Debugf("kubelet not ready for %s, using instance status: %v", instance.Name, err)
+			}
+		}
+
+		// Fall back to instance status
 		pods.Items = append(pods.Items, *ToPod(instance))
 	}
 	return pods, nil
