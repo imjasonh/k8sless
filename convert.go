@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/json"
 	"strings"
 
@@ -8,6 +9,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+//go:embed cloud-init.yaml
+var cloudInitTemplate string
 
 func ToPod(instance *compute.Instance) *corev1.Pod {
 	pod := &corev1.Pod{
@@ -75,6 +79,12 @@ func ToInstance(pod *corev1.Pod, project, zone string) compute.Instance {
 			}, {
 				Key:   "user-data",
 				Value: &[]string{cloudInitTemplate}[0],
+			}, {
+				Key:   "google-logging-enabled",
+				Value: &[]string{"true"}[0],
+			}, {
+				Key:   "google-monitoring-enabled",
+				Value: &[]string{"true"}[0],
 			}},
 		},
 		Disks: []*compute.AttachedDisk{{
@@ -95,6 +105,19 @@ func ToInstance(pod *corev1.Pod, project, zone string) compute.Instance {
 		Tags: &compute.Tags{
 			Items: []string{"k8sless", "kubelet-api"},
 		},
+		Labels: map[string]string{
+			"k8sless":   "true",
+			"pod-name":  pod.Name,
+			"namespace": pod.Namespace,
+		},
+		ServiceAccounts: []*compute.ServiceAccount{{
+			Email: "default",
+			Scopes: []string{
+				"https://www.googleapis.com/auth/logging.write",
+				"https://www.googleapis.com/auth/monitoring.write",
+				"https://www.googleapis.com/auth/devstorage.read_only", // For pulling container images
+			},
+		}},
 		Scheduling: &compute.Scheduling{
 			InstanceTerminationAction: "DELETE",
 			OnHostMaintenance:         "TERMINATE",

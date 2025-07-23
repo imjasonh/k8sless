@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"time"
 
 	"github.com/chainguard-dev/clog"
 	"google.golang.org/api/compute/v1"
@@ -81,7 +82,17 @@ func main() {
 		case watch.Modified:
 			log.With("pod", pod.Name).Infof("pod modified: %s %s", pod.Name, pod.Status.Phase)
 			if pod.Status.Phase == corev1.PodRunning {
-				log.Infof("Pod is running!")
+				log.Infof("Pod is running! Waiting 10 seconds before deletion...")
+				go func() {
+					log.Infof("Deleting pod %s after 1 minute...", p.Name)
+					time.Sleep(time.Minute)
+					err := c.CoreV1().Pods("default").Delete(ctx, p.Name, metav1.DeleteOptions{})
+					if err != nil {
+						log.Errorf("error deleting pod: %v", err)
+					} else {
+						log.Infof("Pod deleted successfully")
+					}
+				}()
 			}
 			if pod.Status.Phase == corev1.PodSucceeded {
 				log.Infof("Pod completed successfully!")
@@ -95,6 +106,7 @@ func main() {
 			}
 		case watch.Deleted:
 			log.With("pod", pod.Name).Infof("pod deleted: %s %s", pod.Name, pod.Status.Phase)
+			return
 		}
 	}
 }

@@ -1,6 +1,4 @@
-package main
-
-const cloudInitTemplate = `#cloud-config
+#cloud-config
 
 write_files:
 - path: /etc/kubernetes/kubelet-config.yaml
@@ -27,6 +25,25 @@ write_files:
     imageMinimumGCAge: 2m
     healthzBindAddress: 0.0.0.0
     healthzPort: 10248
+
+- path: /etc/fluent-bit/fluent-bit-containerd.conf
+  permissions: '0644'
+  content: |
+    # Collect containerd/kubelet container logs
+    [INPUT]
+        Name tail
+        Tag k8sless_containers
+        Path /var/log/containers/*.log
+        DB /var/log/google-fluentbit/k8sless-containers.log.db
+        Read_from_Head True
+        Mem_Buf_Limit 5MB
+        Skip_Long_Lines On
+    
+    [FILTER]
+        Name modify
+        Match k8sless_containers
+        Add k8sless true
+        Add resource.type gce_instance
 
 - path: /etc/systemd/system/k8sless-kubelet.service
   permissions: '0644'
@@ -59,4 +76,6 @@ runcmd:
 # NOTE: Alternative approaches could include SSH tunneling or a sidecar container
 - iptables -A INPUT -p tcp --dport 10255 -j ACCEPT
 - iptables -A INPUT -p tcp --dport 10248 -j ACCEPT
-`
+# Configure fluent-bit to collect containerd logs
+- echo "@INCLUDE /etc/fluent-bit/fluent-bit-containerd.conf" >> /etc/fluent-bit/fluent-bit.conf
+- systemctl restart fluent-bit
