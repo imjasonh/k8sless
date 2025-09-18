@@ -1,14 +1,6 @@
 # k8sless
 
-A Kubernetes API adapter that manages Google Compute Engine VMs instead of Pods. It implements the Kubernetes Pod API but creates and manages GCE instances running Container-Optimized OS with kubelet.
-
-## Overview
-
-k8sless bridges the Kubernetes Pod API to Google Compute Engine, allowing you to:
-- Create "pods" that are actually GCE VMs running Container-Optimized OS
-- Run containers using kubelet in static pod mode
-- Monitor pod status through the kubelet read-only API
-- Collect logs and metrics in Google Cloud Logging and Monitoring
+A Kubernetes API client that manages Google Compute Engine VMs instead of Pods. Instead of communicating with a Kubernetes API server to store pod specs in etcd and schedule those pods on nodes that run those pods with kubelet, this cuts out the middlemen and just sends your pod spec directly new a new one-time-use VM that runs the pod using kubelet.
 
 ## Features
 
@@ -37,10 +29,9 @@ This will:
 ### How It Works
 
 1. **Pod Creation**: When a pod is created via the Kubernetes API, k8sless:
-   - Converts the Pod spec to a GCE Instance configuration
-   - Stores the full Pod spec in instance metadata
    - Creates a VM with Container-Optimized OS (COS)
-   - Uses cloud-init to configure and start kubelet
+   - Stores the full Pod spec in VM instance metadata
+   - Uses cloud-init to configure and start kubelet to run the pod
 
 2. **Container Execution**: The VM boots and:
    - Retrieves the pod spec from metadata
@@ -83,7 +74,7 @@ Logs include:
 
 ### VM Configuration
 - **Machine Type**: c4-standard-4 (hardcoded, TODO: make configurable)
-- **OS**: Container-Optimized OS (latest stable)
+- **OS**: Container-Optimized OS (latest stable, TODO: make configurable)
 - **Network**: Default VPC with external IP
 - **Max Runtime**: 4 hours (configurable via Scheduling)
 
@@ -102,32 +93,11 @@ The default compute service account needs:
 
 ## Limitations
 
-- Only supports single-node pods (no multi-node orchestration)
-- No service discovery or networking between pods
+- No multi-node orchestration, no integration with ReplicaSet or Job controllers
+- No service discovery or networking between pods (on purpose)
 - No persistent volumes (only ephemeral storage)
 - Requires `hostNetwork: true` (no CNI networking)
-- Limited to Container-Optimized OS features
-
-## Development
-
-### Prerequisites
-- Go 1.21+
-- Google Cloud SDK (`gcloud`)
-- GCP project with Compute Engine API enabled
-
-### Building
-
-```bash
-go build -o k8sless .
-```
-
-### Project Structure
-- `main.go` - CLI entry point and pod lifecycle management
-- `client.go` - Kubernetes API client implementation
-- `convert.go` - Pod to GCE instance conversion
-- `watch.go` - Pod status monitoring via kubelet API
-- `kubelet.go` - Kubelet API client
-- `cloud-init.yaml` - VM initialization script (embedded)
+- Limited to Container-Optimized OS features (for now)
 
 ## Future Improvements
 
